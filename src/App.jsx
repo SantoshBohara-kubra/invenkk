@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import Header from './components/Header';
-import ProductList from './components/ProductList';
+import ItemUploader from './components/ItemUploader';
+import ItemProductList from './components/ItemProductList';
 import Cart from './components/Cart';
 import Checkout from './components/Checkout';
 import { getSessionId } from './utils/sessionId';
@@ -18,6 +19,8 @@ function App() {
   const [totalPrice, setTotalPrice] = useState('0.00');
   const [sessionId] = useState(getSessionId());
   const [orderComplete, setOrderComplete] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [showUploader, setShowUploader] = useState(false);
 
   useEffect(() => {
     fetchCartCount();
@@ -29,7 +32,6 @@ function App() {
       setCartItemCount(response.data.length);
     } catch (err) {
       console.warn('Backend not available, using mock cart:', err.message);
-      // Fallback to mock cart
       const mockCart = getMockCart();
       setCartItemCount(mockCart.length);
     }
@@ -42,38 +44,20 @@ function App() {
         quantity: 1,
         session_id: sessionId
       });
-
       fetchCartCount();
-
-      // Show success message
       alert(`${product.name} added to cart!`);
     } catch (err) {
       console.warn('Backend not available, using mock cart:', err.message);
-
-      // Fallback to mock cart
       addToMockCart(product.id, 1);
       fetchCartCount();
-
-      // Show success message
       alert(`${product.name} added to cart!`);
     }
   };
 
-  const handleSearch = (term) => {
-    setSearchTerm(term);
-  };
-
-  const handleCategoryChange = (cat) => {
-    setCategory(cat);
-  };
-
-  const handleCartClick = () => {
-    setShowCart(true);
-  };
-
-  const handleCloseCart = () => {
-    setShowCart(false);
-  };
+  const handleSearch = (term) => setSearchTerm(term);
+  const handleCategoryChange = (cat) => setCategory(cat);
+  const handleCartClick = () => setShowCart(true);
+  const handleCloseCart = () => setShowCart(false);
 
   const handleCheckout = (items, total) => {
     setCartItems(items);
@@ -82,20 +66,21 @@ function App() {
     setShowCheckout(true);
   };
 
-  const handleCloseCheckout = () => {
-    setShowCheckout(false);
-  };
+  const handleCloseCheckout = () => setShowCheckout(false);
 
   const handleOrderComplete = (order) => {
     setOrderComplete(order);
     setShowCheckout(false);
-    fetchCartCount(); // Refresh cart count after order
-
-    // Show success message
+    fetchCartCount();
     setTimeout(() => {
       alert(`Order placed successfully! Order ID: ${order.id}`);
       setOrderComplete(null);
     }, 100);
+  };
+
+  const handleRefreshInventory = () => {
+    setRefreshKey(prev => prev + 1);
+    setShowUploader(false);
   };
 
   return (
@@ -105,10 +90,11 @@ function App() {
         onCategoryChange={handleCategoryChange}
         cartItemCount={cartItemCount}
         onCartClick={handleCartClick}
+        onAddProductClick={() => setShowUploader(true)} // ✅ pass the modal trigger
       />
 
       <main className="container mx-auto px-4 py-8">
-        <div className="mb-6">
+        <div className="mb-6 mt-6">
           {category && (
             <p className="text-lg text-gray-600">
               Category: <span className="font-semibold">{category}</span>
@@ -121,7 +107,8 @@ function App() {
           )}
         </div>
 
-        <ProductList
+        <ItemProductList
+          key={refreshKey}
           category={category}
           searchTerm={searchTerm}
           onAddToCart={handleAddToCart}
@@ -144,6 +131,20 @@ function App() {
           onClose={handleCloseCheckout}
           onOrderComplete={handleOrderComplete}
         />
+      )}
+
+      {showUploader && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full p-6 relative">
+            <button
+              onClick={() => setShowUploader(false)}
+              className="absolute top-3 right-4 text-gray-600 hover:text-black text-2xl"
+            >
+              &times;
+            </button>
+            <ItemUploader onProductUpload={handleRefreshInventory} />
+          </div>
+        </div>
       )}
     </div>
   );

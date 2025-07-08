@@ -23,7 +23,7 @@ export const mockProducts = [
     name: "Coffee Mug",
     description: "Ceramic coffee mug perfect for your morning brew",
     price: 12.99,
-    image_url: "https://images.unsplash.com/photo-1514228742587-6b1558fcf93a?w=500",
+    image_url: "https://rusticranchfurniture.ca/cdn/shop/products/c7c9de93f674e33c5446634b9b4db32f.jpg?v=1669927284",
     category: "Home & Kitchen",
     stock: 200
   },

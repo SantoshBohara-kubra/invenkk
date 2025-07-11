@@ -5,17 +5,14 @@ from datetime import datetime
 import os
 
 app = Flask(__name__)
-
-# Configure CORS to allow requests from frontend
 CORS(app, origins=['http://localhost:5173'])
 
-# Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///mini_amazon.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# Database Models
+# Models
 class Product(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
@@ -42,7 +39,7 @@ class CartItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False, default=1)
-    session_id = db.Column(db.String(100), nullable=False)  # Simple session tracking
+    session_id = db.Column(db.String(100), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     product = db.relationship('Product', backref='cart_items')
@@ -80,7 +77,7 @@ class OrderItem(db.Model):
     order_id = db.Column(db.Integer, db.ForeignKey('order.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
-    price = db.Column(db.Float, nullable=False)  # Price at time of order
+    price = db.Column(db.Float, nullable=False)
 
     order = db.relationship('Order', backref='items')
     product = db.relationship('Product')
@@ -95,7 +92,7 @@ class OrderItem(db.Model):
             'product': self.product.to_dict() if self.product else None
         }
 
-# API Routes
+# API Endpoints
 @app.route('/api/products', methods=['GET'])
 def get_products():
     page = request.args.get('page', 1, type=int)
@@ -104,10 +101,8 @@ def get_products():
     search = request.args.get('search', type=str)
 
     query = Product.query
-
     if category:
         query = query.filter(Product.category == category)
-
     if search:
         query = query.filter(Product.name.contains(search))
 
@@ -127,6 +122,7 @@ def get_product(product_id):
 
 @app.route('/api/categories', methods=['GET'])
 def get_categories():
+    # Returns a unique list of non-null categories
     categories = db.session.query(Product.category).distinct().all()
     return jsonify([cat[0] for cat in categories if cat[0]])
 
@@ -145,20 +141,12 @@ def add_to_cart():
     if not all([product_id, session_id]):
         return jsonify({'error': 'Missing required fields'}), 400
 
-    # Check if item already exists in cart
-    existing_item = CartItem.query.filter_by(
-        product_id=product_id,
-        session_id=session_id
-    ).first()
+    existing_item = CartItem.query.filter_by(product_id=product_id, session_id=session_id).first()
 
     if existing_item:
         existing_item.quantity += quantity
     else:
-        cart_item = CartItem(
-            product_id=product_id,
-            quantity=quantity,
-            session_id=session_id
-        )
+        cart_item = CartItem(product_id=product_id, quantity=quantity, session_id=session_id)
         db.session.add(cart_item)
 
     db.session.commit()
@@ -168,11 +156,9 @@ def add_to_cart():
 def update_cart_item(item_id):
     data = request.get_json()
     quantity = data.get('quantity')
-
     cart_item = CartItem.query.get_or_404(item_id)
     cart_item.quantity = quantity
     db.session.commit()
-
     return jsonify(cart_item.to_dict())
 
 @app.route('/api/cart/<int:item_id>', methods=['DELETE'])
@@ -191,26 +177,22 @@ def create_order():
     if not session_id:
         return jsonify({'error': 'Session ID required'}), 400
 
-    # Get cart items
     cart_items = CartItem.query.filter_by(session_id=session_id).all()
-
     if not cart_items:
         return jsonify({'error': 'Cart is empty'}), 400
 
-    # Calculate total
     total_amount = sum(item.product.price * item.quantity for item in cart_items)
 
-    # Create order
-    order = Order(
-        session_id=session_id,
-        total_amount=total_amount,
-        shipping_address=shipping_address
-    )
+    order = Order(session_id=session_id, total_amount=total_amount, shipping_address=shipping_address)
     db.session.add(order)
-    db.session.flush()  # Get order ID
+    db.session.flush()
 
-    # Create order items
     for cart_item in cart_items:
+        if cart_item.product.stock >= cart_item.quantity:
+            cart_item.product.stock -= cart_item.quantity
+        else:
+            return jsonify({'error': f'Not enough stock for {cart_item.product.name}'}), 400
+
         order_item = OrderItem(
             order_id=order.id,
             product_id=cart_item.product_id,
@@ -219,7 +201,6 @@ def create_order():
         )
         db.session.add(order_item)
 
-    # Clear cart
     CartItem.query.filter_by(session_id=session_id).delete()
 
     db.session.commit()
@@ -230,24 +211,31 @@ def get_orders(session_id):
     orders = Order.query.filter_by(session_id=session_id).order_by(Order.created_at.desc()).all()
     return jsonify([order.to_dict() for order in orders])
 
+@app.route('/api/upload-item', methods=['POST'])
+def upload_item():
+    data = request.get_json()
+    required_fields = ['name', 'price', 'stock']
+    if not all(field in data for field in required_fields):
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    existing_product = Product.query.filter_by(name=data['name']).first()
+    if existing_product:
+        existing_product.stock += int(data['stock'])
+    else:
+        new_product = Product(
+            name=data['name'],
+            description=data.get('description', ''),
+            price=float(data['price']),
+            image_url=data.get('image_url', ''),
+            category=data.get('category', ''),
+            stock=int(data['stock'])
+        )
+        db.session.add(new_product)
+
+    db.session.commit()
+    return jsonify({'message': 'Inventory updated successfully'}), 200
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        # Add sample data if no products exist
-        if Product.query.count() == 0:
-            sample_products = [
-                Product(name="Wireless Bluetooth Headphones", description="High-quality wireless headphones with noise cancellation", price=79.99, image_url="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500", category="Electronics", stock=50),
-                Product(name="Smartphone Case", description="Protective case for your smartphone", price=19.99, image_url="https://images.unsplash.com/photo-1601593346740-925612772716?w=500", category="Electronics", stock=100),
-                Product(name="Coffee Mug", description="Ceramic coffee mug perfect for your morning brew", price=12.99, image_url="https://images.unsplash.com/photo-1514228742587-6b1558fcf93a?w=500", category="Home & Kitchen", stock=200),
-                Product(name="Running Shoes", description="Comfortable running shoes for your daily jogs", price=89.99, image_url="https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500", category="Sports", stock=75),
-                Product(name="Laptop Stand", description="Adjustable laptop stand for better ergonomics", price=34.99, image_url="https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=500", category="Electronics", stock=30),
-                Product(name="Water Bottle", description="Stainless steel water bottle keeps drinks cold", price=24.99, image_url="https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500", category="Sports", stock=150),
-                Product(name="Book: Programming Guide", description="Comprehensive guide to modern programming", price=45.99, image_url="https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=500", category="Books", stock=25),
-                Product(name="Desk Lamp", description="LED desk lamp with adjustable brightness", price=39.99, image_url="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500", category="Home & Kitchen", stock=60)
-            ]
-
-            for product in sample_products:
-                db.session.add(product)
-            db.session.commit()
-
     app.run(debug=True, host='0.0.0.0', port=5000)
